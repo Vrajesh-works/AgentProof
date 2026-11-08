@@ -135,6 +135,15 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    from agentproof.db import Database
+    from agentproof.demo import seed
+
+    ids = asyncio.run(seed(Database.from_env()))
+    print("seeded runs: " + ", ".join(ids))
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -188,6 +197,9 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="load results JSON files into DATABASE_URL")
     imp.add_argument("files", nargs="+")
     imp.set_defaults(func=cmd_import)
+
+    demo = sub.add_parser("demo", help="run the shipped suites with demo agents and store the runs")
+    demo.set_defaults(func=cmd_demo)
 
     serve = sub.add_parser("serve", help="run the API server")
     serve.add_argument("--host", default="127.0.0.1")

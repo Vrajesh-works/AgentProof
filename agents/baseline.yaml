@@ -1,0 +1,6 @@
+# The agent version on main. The scripted agent replays reference solutions,
+# so with no injected faults it is the "known good" baseline.
+type: scripted
+version: v1
+seed: 7
+fault_rate: 0.0

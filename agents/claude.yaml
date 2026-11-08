@@ -1,0 +1,5 @@
+# A real model behind the Claude adapter. Needs ANTHROPIC_API_KEY.
+# The model can be overridden with AGENTPROOF_CLAUDE_MODEL.
+type: claude
+version: claude-opus-5-5
+model: claude-opus-5-5

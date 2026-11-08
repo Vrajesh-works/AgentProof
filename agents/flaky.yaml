@@ -1,0 +1,11 @@
+# A deliberately flaky agent for demos: it usually succeeds, so pass@k stays
+# high, but not always, so pass^k drops. Used by the seeded demo data.
+type: scripted
+version: v3-flaky
+seed: 11
+fault_rate: 0.0
+task_fault_rates:
+  cancel-reason-mapping: 0.5
+  return-mug-to-gift-card: 0.3
+  change-to-available-flight: 0.5
+  refund-active-customer: 0.4

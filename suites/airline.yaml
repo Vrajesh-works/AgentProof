@@ -1,0 +1,89 @@
+suite: airline-core
+description: >
+  tau-bench style airline reservation tasks on AgentProof's built-in airline
+  environment: cancellations under policy, baggage fees and flight changes.
+environment:
+  type: airline
+k: 4
+budget:
+  max_steps: 10
+  max_tool_calls: 8
+  max_tokens: 120000
+  max_cost_usd: 0.50
+  tool_timeout_s: 5
+  trial_timeout_s: 180
+
+tasks:
+  - id: gold-member-cancel
+    description: Gold members may cancel without insurance.
+    tags: [cancel, write]
+    instruction: I'm Mia (user mia_10). Please cancel reservation R-5001.
+    reference:
+      - {tool: get_reservation, args: {reservation_id: R-5001}}
+      - {tool: cancel_reservation, args: {reservation_id: R-5001}}
+    reference_answer: Reservation R-5001 is cancelled and $320.00 will be refunded.
+    expected:
+      state_diff:
+        reservations/R-5001/status: cancelled
+        flights/AP100/seats: 5
+      tool_order: [get_reservation, cancel_reservation]
+
+  - id: refuse-cancel-no-insurance
+    description: Regular member, no insurance, flight operating; must refuse.
+    tags: [policy, read-only]
+    instruction: This is Omar (omar_11). Cancel my reservation R-5002.
+    reference:
+      - {tool: get_user, args: {user_id: omar_11}}
+      - {tool: get_reservation, args: {reservation_id: R-5002}}
+    reference_answer: >
+      I can't cancel R-5002: cancellation needs travel insurance, gold membership, or a
+      flight cancelled by the airline.
+    expected:
+      state_diff: {}
+      forbidden_tools: [cancel_reservation]
+      answer_regex: "(?i)(cannot|can't|unable)"
+
+  - id: cancel-airline-cancelled-flight
+    description: The airline cancelled the flight, so anyone may cancel.
+    tags: [cancel, write]
+    instruction: Omar here (omar_11). My flight on reservation R-5003 was cancelled, please cancel the booking.
+    reference:
+      - {tool: get_reservation, args: {reservation_id: R-5003}}
+      - {tool: cancel_reservation, args: {reservation_id: R-5003}}
+    reference_answer: R-5003 is cancelled; you will get $350.00 back including the bag fee.
+    expected:
+      state_diff:
+        reservations/R-5003/status: cancelled
+        flights/AP200/seats: 10
+
+  - id: add-bags-silver
+    description: Silver gets one free bag; extra bags cost $50 each.
+    tags: [baggage, write]
+    instruction: Lena (lena_12) here. I need 3 checked bags in total on reservation R-5004.
+    reference:
+      - {tool: get_reservation, args: {reservation_id: R-5004}}
+      - {tool: update_baggage, args: {reservation_id: R-5004, total_bags: 3}}
+    reference_answer: R-5004 now has 3 checked bags; the bag fee is $100.00.
+    expected:
+      state_diff:
+        reservations/R-5004/bags: 3
+        reservations/R-5004/bag_fees: 100.0
+      answer_contains: ["100"]
+
+  - id: change-to-available-flight
+    description: The next-day flight is full; the agent has to find the one after.
+    tags: [change, write, search]
+    instruction: >
+      Mia (mia_10) again. Move reservation R-5001 to a later BOS to SFO flight, the
+      earliest one that still has seats.
+    reference:
+      - {tool: get_reservation, args: {reservation_id: R-5001}}
+      - {tool: search_flights, args: {origin: BOS, destination: SFO}}
+      - {tool: change_flight, args: {reservation_id: R-5001, new_flight: AP104}}
+    reference_answer: R-5001 is now on AP104 on 2026-12-03 (AP102 was full); the fare is $45.00 lower.
+    expected:
+      state_diff:
+        reservations/R-5001/flight: AP104
+        flights/AP100/seats: 5
+        flights/AP104/seats: 6
+      tool_order: [search_flights, change_flight]

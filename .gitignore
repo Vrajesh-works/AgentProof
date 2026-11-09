@@ -221,3 +221,4 @@ __marimo__/
 
 # The viewer keeps TypeScript modules in src/lib; the Python lib/ rule above must not hide them.
 !/frontend/src/lib/
+agentproof-results/

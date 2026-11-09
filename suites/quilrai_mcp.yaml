@@ -9,6 +9,9 @@ environment:
   options:
     command: [uv, --directory, "${QUILRAI_MCP_DIR:-../QuilrAI_MCP}/mcp-server", run, --frozen, python, -m, customer_mcp]
     env:
+      # The server needs Python 3.13+. Pin it so a UV_PYTHON inherited from the
+      # caller (setup-uv in CI exports one) cannot pick an older interpreter.
+      UV_PYTHON: ">=3.13"
       CUSTOMER_MCP_DB: ":memory:"
       CUSTOMER_MCP_LOG_LEVEL: WARNING
     startup_timeout_s: 120

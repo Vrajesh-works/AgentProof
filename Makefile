@@ -3,7 +3,7 @@ UV ?= uv
 BACKEND := backend
 FRONTEND := frontend
 
-.PHONY: up down install lint test test-unit test-integration test-frontend demo dev-api dev-web gate quilrai
+.PHONY: up down install lint lint-backend lint-frontend test test-unit test-integration test-frontend demo dev-api dev-web gate quilrai
 
 up: ## build and start PostgreSQL, the API and the viewer on http://localhost:8080
 	docker compose up --build --wait
@@ -16,8 +16,12 @@ install:
 	cd $(BACKEND) && $(UV) sync --all-extras
 	cd $(FRONTEND) && npm ci
 
-lint:
+lint: lint-backend lint-frontend
+
+lint-backend:
 	cd $(BACKEND) && $(UV) run ruff check . && $(UV) run ruff format --check .
+
+lint-frontend:
 	cd $(FRONTEND) && npm run lint
 
 test: test-unit test-integration test-frontend

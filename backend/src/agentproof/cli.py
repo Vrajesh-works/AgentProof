@@ -41,6 +41,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             failed = [c["name"] for c in trial.checks if not c["passed"]]
             extra = f" ({', '.join(failed)})" if failed else ""
             print(f"  {mark} {task_id} #{trial.index}{extra}", file=sys.stderr)
+            # A trial that never completed (environment or agent error) hides the cause
+            # in the check detail; show it so CI logs explain the failure.
+            for check in trial.checks:
+                if check["name"] == "completed" and not check["passed"] and check.get("detail"):
+                    print(f"       {check['detail'][:2000]}", file=sys.stderr)
 
     options = RunOptions(
         k=args.k,

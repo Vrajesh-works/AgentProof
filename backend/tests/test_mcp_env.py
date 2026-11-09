@@ -122,3 +122,27 @@ def test_quilrai_suite_runs_against_fake_server(fake_mcp_command):
     suite = parse_suite(data)
     result = asyncio.run(run_suite(suite, ScriptedAgent(), RunOptions(k=2)))
     assert result.summary.pass_hat_k == 1.0, [c for t in result.tasks for tr in t.trials for c in tr.checks]
+
+
+def test_cli_prints_why_a_trial_never_completed(tmp_path, capsys):
+    """When the MCP server cannot start, the run log shows the server's stderr, not just 'completed'."""
+    import sys
+
+    import yaml
+
+    from agentproof.cli import main
+
+    data = load_suite(SUITES / "quilrai_mcp.yaml").model_dump(mode="json")
+    data["environment"]["options"]["command"] = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write('interpreter too old'); sys.exit(2)",
+    ]
+    data["tasks"] = data["tasks"][:1]
+    suite_file = tmp_path / "broken.yaml"
+    suite_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    assert main(["run", str(suite_file), "--n", "1", "--k", "1", "--min-pass-hat-k", "1.0"]) == 1
+    err = capsys.readouterr().err
+    assert "FAIL" in err
+    assert "interpreter too old" in err

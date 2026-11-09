@@ -1,0 +1,10 @@
+.git
+.github
+**/node_modules
+**/dist
+**/__pycache__
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+**/*.db
+agentproof-results

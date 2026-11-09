@@ -1,0 +1,41 @@
+# One-command local stack: PostgreSQL, the API (seeds demo runs on first
+# start) and the viewer. Open http://localhost:8080 after `docker compose up`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentproof
+      POSTGRES_PASSWORD: agentproof
+      POSTGRES_DB: agentproof
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentproof -d agentproof"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://agentproof:agentproof@db:5432/agentproof
+      AGENTPROOF_SEED_DEMO: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "${AGENTPROOF_API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    ports:
+      - "${AGENTPROOF_WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

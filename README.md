@@ -218,6 +218,15 @@ integration tests on PostgreSQL. CI runs these jobs:
   to show. I limited the demo agent to faults that change the outcome
   (`skip_step`, `wrong_args`, `bad_answer`). Now pass@k stays at 1.0 while
   pass^k drops to 0.71 on retail and 0.80 on airline.
+- **The QuilrAI contract job failed in CI but passed locally.** Every trial
+  failed in about 10 ms with 0 tokens, and the log only said `(completed)`.
+  `astral-sh/setup-uv` exports `UV_PYTHON=3.12`, and the MCP child process
+  inherits the parent environment, so `uv run` inside the QuilrAI checkout
+  resolved Python 3.12. The server requires 3.13 or newer. I reproduced it
+  locally by setting `UV_PYTHON=3.12`. The fix pins `UV_PYTHON: ">=3.13"` in
+  the suite's server `env`, which overrides anything inherited. I also made
+  `agentproof run` print the detail of a trial that never completed, so the
+  next environment failure explains itself in the CI log.
 - **Browser automation could not attach in WSL**, so I could not check the
   viewer the usual way. I ran headless Chrome in a container on the compose
   network and took screenshots of `http://web/`. That also proves the nginx

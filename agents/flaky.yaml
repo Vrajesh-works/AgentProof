@@ -1,0 +1,15 @@
+# A deliberately flaky agent for demos: it usually succeeds, so pass@k stays
+# high, but not always, so pass^k drops. Used by the seeded demo data.
+# extra_call is left out because an unrequested read-only call rarely changes
+# the outcome; these three modes produce visible failures.
+type: scripted
+version: v3-flaky
+seed: 11
+fault_rate: 0.0
+fault_modes: [skip_step, wrong_args, bad_answer]
+task_fault_rates:
+  cancel-reason-mapping: 0.5
+  return-mug-to-gift-card: 0.3
+  add-bags-silver: 0.3
+  change-to-available-flight: 0.5
+  refund-active-customer: 0.4

@@ -1,0 +1,148 @@
+suite: retail-core
+description: >
+  tau-bench style retail customer service tasks on AgentProof's built-in retail
+  environment. Success is judged by the final database state first.
+environment:
+  type: retail
+k: 4
+budget:
+  max_steps: 12
+  max_tool_calls: 10
+  max_tokens: 150000
+  max_cost_usd: 0.75
+  tool_timeout_s: 5
+  trial_timeout_s: 180
+
+tasks:
+  - id: cancel-pending-order
+    description: Cancel a pending order with a valid reason; refund goes to the card.
+    tags: [cancel, write]
+    instruction: >
+      Hi, this is Alice (alice@example.com). Please cancel my order W1001, I ordered
+      it by mistake.
+    reference:
+      - {tool: find_user_by_email, args: {email: alice@example.com}}
+      - {tool: get_order, args: {order_id: W1001}}
+      - {tool: cancel_pending_order, args: {order_id: W1001, reason: ordered by mistake}}
+    reference_answer: Your order W1001 has been cancelled and $39.00 will be refunded to your card.
+    expected:
+      state_diff:
+        orders/W1001/status: cancelled
+        orders/W1001/cancel_reason: ordered by mistake
+        orders/W1001/refund_amount: 39.0
+      tool_order: [get_order, cancel_pending_order]
+      answer_contains: [cancelled]
+
+  - id: cancel-reason-mapping
+    description: Map the user's wording to the allowed cancellation reason.
+    tags: [cancel, write, arguments]
+    instruction: >
+      I'm Chen (chen@example.com). I don't need order W3001 anymore, can you cancel it?
+    reference:
+      - {tool: find_user_by_email, args: {email: chen@example.com}}
+      - {tool: get_order, args: {order_id: W3001}}
+      - {tool: cancel_pending_order, args: {order_id: W3001, reason: no longer needed}}
+    reference_answer: Order W3001 is cancelled; $14.00 goes back to your card ending 1881.
+    expected:
+      state_diff:
+        orders/W3001/status: cancelled
+        orders/W3001/cancel_reason: no longer needed
+        orders/W3001/refund_amount: 14.0
+      required_calls:
+        - {tool: cancel_pending_order, args: {order_id: W3001, reason: no longer needed}}
+
+  - id: refuse-cancel-processed
+    description: A processed order cannot be cancelled; the agent must check and refuse.
+    tags: [policy, read-only]
+    instruction: >
+      This is Bruno (bruno@example.com). Cancel order W2001 right now please.
+    reference:
+      - {tool: find_user_by_email, args: {email: bruno@example.com}}
+      - {tool: get_order, args: {order_id: W2001}}
+    reference_answer: >
+      Order W2001 has already been processed, so it cannot be cancelled. I can help
+      with a return once it is delivered.
+    expected:
+      state_diff: {}
+      tool_order: [get_order]
+      forbidden_tools: [cancel_pending_order]
+      answer_regex: "(?i)(cannot|can't|unable)"
+
+  - id: return-mug-to-gift-card
+    description: Return one item of a delivered order to the original gift card.
+    tags: [return, write]
+    instruction: >
+      Hello, Alice here (alice@example.com). From my delivered order W1002 I want to
+      return just the 16oz mug. Refund it to the gift card I paid with.
+    reference:
+      - {tool: find_user_by_email, args: {email: alice@example.com}}
+      - {tool: get_order, args: {order_id: W1002}}
+      - {tool: return_delivered_order_items, args: {order_id: W1002, item_ids: [I-MUG-16], payment_method_id: gift_alice}}
+    reference_answer: The return for the 16oz mug is requested; $14.00 was added to your gift card.
+    expected:
+      state_diff:
+        orders/W1002/status: return_requested
+        orders/W1002/return_items: [I-MUG-16]
+        orders/W1002/refund_method: gift_alice
+        orders/W1002/refund_amount: 14.0
+        users/alice_01/payment_methods/gift_alice/balance: 39.0
+      tool_order: [get_order, return_delivered_order_items]
+
+  - id: update-shipping-address
+    description: Change the shipping address of a pending order.
+    tags: [modify, write]
+    instruction: >
+      Chen here, chen@example.com. Please ship order W3001 to 200 Mission St,
+      San Francisco, 94105 instead.
+    reference:
+      - {tool: find_user_by_email, args: {email: chen@example.com}}
+      - {tool: modify_pending_order_address, args: {order_id: W3001, street: 200 Mission St, city: San Francisco, zip: "94105"}}
+    reference_answer: Order W3001 will now ship to 200 Mission St, San Francisco, 94105.
+    expected:
+      state_diff:
+        orders/W3001/shipping_address:
+          street: 200 Mission St
+          city: San Francisco
+          zip: "94105"
+
+  - id: order-status-json
+    description: Read-only lookup whose answer must match a JSON schema.
+    tags: [read-only, structured-output]
+    instruction: >
+      What is the status of order W2001 and how many items are in it? Answer with only
+      a JSON object with keys order_id, status and item_count.
+    reference:
+      - {tool: get_order, args: {order_id: W2001}}
+    reference_answer: '{"order_id": "W2001", "status": "processed", "item_count": 1}'
+    expected:
+      state_diff: {}
+      answer_schema:
+        type: object
+        required: [order_id, status, item_count]
+        properties:
+          order_id: {const: W2001}
+          status: {const: processed}
+          item_count: {const: 1}
+
+  - id: escalate-price-match
+    description: Out-of-policy request; escalate to a human without changing orders.
+    tags: [policy, escalation, judge]
+    instruction: >
+      I'm Alice (alice@example.com). I saw the desk lamp from order W1001 for $10 less
+      somewhere else. Can you price match it?
+    reference:
+      - {tool: find_user_by_email, args: {email: alice@example.com}}
+      - {tool: transfer_to_human, args: {summary: Customer alice_01 requests a price match on order W1001.}}
+    reference_answer: >
+      I can't price match with my tools, so I have transferred you to a human agent who
+      can review the request for order W1001.
+    expected:
+      required_calls:
+        - {tool: transfer_to_human}
+      forbidden_tools: [cancel_pending_order, return_delivered_order_items, modify_pending_order_address]
+      judge:
+        rubric: >
+          Pass if the answer tells the customer the request was handed to a human agent
+          and does not promise a refund or discount.
+        must_mention: [human]
+        must_not_mention: [refunded, discount applied]

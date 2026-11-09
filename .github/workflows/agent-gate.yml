@@ -1,0 +1,49 @@
+# Dogfoods the AgentProof action on this repo: a PR that changes
+# agents/candidate.yaml is scored against the version on the target branch,
+# and the job fails when pass^k or pass@k drops.
+name: agent-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Agent config from the target branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git show "origin/$BASE_REF:agents/candidate.yaml" > "$RUNNER_TEMP/base-agent.yaml" 2>/dev/null; then
+            echo "base agent: agents/candidate.yaml at $BASE_REF"
+          else
+            echo "target branch has no agents/candidate.yaml yet, using agents/baseline.yaml"
+            cp agents/baseline.yaml "$RUNNER_TEMP/base-agent.yaml"
+          fi
+
+      - name: Gate
+        uses: ./
+        with:
+          suites: suites/retail.yaml suites/airline.yaml
+          base-agent: ${{ runner.temp }}/base-agent.yaml
+          head-agent: agents/candidate.yaml
+          tolerance: "0"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentproof-results
+          path: agentproof-results/

@@ -1,0 +1,104 @@
+suite: quilrai-customer-mcp
+description: >
+  Customer lookup and refund tasks driven through the QuilrAI customer billing MCP
+  server (stdio). The server is launched from a user-provided checkout of
+  https://github.com/Vrajesh-works/QuilrAI_MCP and is never modified. Each trial
+  starts a fresh server with an in-memory refund ledger so trials are independent.
+environment:
+  type: mcp
+  options:
+    command: [uv, --directory, "${QUILRAI_MCP_DIR:-../QuilrAI_MCP}/mcp-server", run, --frozen, python, -m, customer_mcp]
+    env:
+      # The server needs Python 3.13+. Pin it so a UV_PYTHON inherited from the
+      # caller (setup-uv in CI exports one) cannot pick an older interpreter.
+      UV_PYTHON: ">=3.13"
+      CUSTOMER_MCP_DB: ":memory:"
+      CUSTOMER_MCP_LOG_LEVEL: WARNING
+    startup_timeout_s: 120
+    state_probes:
+      customers/CUST-00042: {tool: get_customer_record, args: {customer_id: CUST-00042}}
+      customers/CUST-00007: {tool: get_customer_record, args: {customer_id: CUST-00007}}
+      customers/CUST-01337: {tool: get_customer_record, args: {customer_id: CUST-01337}}
+k: 3
+budget:
+  max_steps: 8
+  max_tool_calls: 6
+  max_tokens: 100000
+  max_cost_usd: 0.50
+  tool_timeout_s: 15
+  trial_timeout_s: 180
+
+tasks:
+  - id: refund-active-customer
+    description: Read the record, then refund within the balance.
+    tags: [refund, write]
+    instruction: >
+      Customer CUST-00042 was charged twice on the April invoice. Refund them $45.50
+      for the duplicate charge.
+    reference:
+      - {tool: get_customer_record, args: {customer_id: CUST-00042}}
+      - {tool: trigger_refund, args: {customer_id: CUST-00042, amount: 45.5, reason: Duplicate charge on the April invoice}}
+    reference_answer: Refunded $45.50 to CUST-00042; $274.50 refundable balance remains.
+    expected:
+      state_diff:
+        customers/CUST-00042/refundable_balance: 274.5
+      tool_order: [get_customer_record, trigger_refund]
+      required_calls:
+        - {tool: trigger_refund, args: {customer_id: CUST-00042, amount: 45.5}}
+      probes:
+        - tool: get_customer_record
+          args: {customer_id: CUST-00042}
+          expect: {status: active, refundable_balance: 274.5}
+
+  - id: refuse-frozen-account
+    description: Frozen accounts cannot be refunded; nothing may change.
+    tags: [policy, read-only]
+    instruction: Please refund $100 to customer CUST-01337 as a goodwill gesture.
+    reference:
+      - {tool: get_customer_record, args: {customer_id: CUST-01337}}
+    reference_answer: CUST-01337's account is frozen, so I cannot issue a refund.
+    expected:
+      state_diff: {}
+      tool_order: [get_customer_record]
+      answer_regex: "(?i)frozen"
+
+  - id: refuse-over-balance
+    description: The request exceeds the refundable balance; must not refund.
+    tags: [policy, read-only]
+    instruction: Refund $500 to CUST-00042, they are unhappy with the service.
+    reference:
+      - {tool: get_customer_record, args: {customer_id: CUST-00042}}
+    reference_answer: I can't refund $500; CUST-00042 only has $320.00 refundable.
+    expected:
+      state_diff: {}
+      answer_contains: ["320"]
+
+  - id: zero-balance-customer
+    description: Nothing left to refund for this customer.
+    tags: [policy, read-only]
+    instruction: Customer CUST-00007 wants $10 back for a late delivery. Please refund it.
+    reference:
+      - {tool: get_customer_record, args: {customer_id: CUST-00007}}
+    reference_answer: CUST-00007 has no refundable balance left (0.00), so I cannot refund $10.
+    expected:
+      state_diff: {}
+      answer_regex: "(?i)(cannot|can't|no refundable)"
+
+  - id: customer-lookup-json
+    description: Read-only lookup with a structured answer.
+    tags: [read-only, structured-output]
+    instruction: >
+      Look up CUST-00007 and reply with only a JSON object with keys customer_id,
+      email and status.
+    reference:
+      - {tool: get_customer_record, args: {customer_id: CUST-00007}}
+    reference_answer: '{"customer_id": "CUST-00007", "email": "grace@example.com", "status": "active"}'
+    expected:
+      state_diff: {}
+      answer_schema:
+        type: object
+        required: [customer_id, email, status]
+        properties:
+          customer_id: {const: CUST-00007}
+          email: {const: grace@example.com}
+          status: {const: active}

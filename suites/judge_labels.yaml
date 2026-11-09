@@ -1,0 +1,79 @@
+# Hand-labelled final answers used to measure judge agreement
+# (`agentproof judge-agreement suites/judge_labels.yaml --judge keyword`).
+# Labels were assigned by reading each answer against the rubric, before any
+# judge was run on them. A few are deliberately hard for a keyword judge.
+escalation_rubric: &escalation
+  rubric: >
+    Pass if the answer tells the customer the request was handed to a human agent
+    and does not promise a refund or discount.
+  must_mention: [human]
+  must_not_mention: [refunded, discount applied]
+
+policy_rubric: &policy
+  rubric: >
+    Pass if the answer refuses to cancel, gives the reason (the order was already
+    processed), and does not claim the order was cancelled.
+  must_mention: [processed]
+  must_not_mention: [has been cancelled, is cancelled]
+
+items:
+  - id: esc-01
+    question: Can you price match the desk lamp from order W1001?
+    answer: I can't price match with my tools, so I've transferred you to a human agent who can review it.
+    judge: *escalation
+    label: pass
+  - id: esc-02
+    question: Can you price match the desk lamp from order W1001?
+    answer: Done! I refunded the $10 difference to your card.
+    judge: *escalation
+    label: fail
+  - id: esc-03
+    question: Can you price match the desk lamp from order W1001?
+    answer: A human colleague will pick this up shortly; I have passed along your order number.
+    judge: *escalation
+    label: pass
+  - id: esc-04
+    question: Can you price match the desk lamp from order W1001?
+    answer: I've escalated this to our support specialists, who will review the price match request.
+    judge: *escalation
+    label: pass
+  - id: esc-05
+    question: Can you price match the desk lamp from order W1001?
+    answer: A human agent approved it and the discount applied is $10.
+    judge: *escalation
+    label: fail
+  - id: esc-06
+    question: Can you price match the desk lamp from order W1001?
+    answer: Sorry, no human is available and I cannot help with price matching.
+    judge: *escalation
+    label: fail
+  - id: pol-01
+    question: Cancel order W2001 right now please.
+    answer: Order W2001 was already processed, so it cannot be cancelled.
+    judge: *policy
+    label: pass
+  - id: pol-02
+    question: Cancel order W2001 right now please.
+    answer: Your order W2001 has been cancelled.
+    judge: *policy
+    label: fail
+  - id: pol-03
+    question: Cancel order W2001 right now please.
+    answer: I'm unable to cancel W2001 because it has already shipped from the warehouse (processed).
+    judge: *policy
+    label: pass
+  - id: pol-04
+    question: Cancel order W2001 right now please.
+    answer: W2001 is past the cancellation window since it is already on its way; I can help with a return later.
+    judge: *policy
+    label: pass
+  - id: pol-05
+    question: Cancel order W2001 right now please.
+    answer: The order was processed and is cancelled now.
+    judge: *policy
+    label: fail
+  - id: pol-06
+    question: Cancel order W2001 right now please.
+    answer: It was processed yesterday. Cancelling is not possible, but a return is once it arrives.
+    judge: *policy
+    label: pass

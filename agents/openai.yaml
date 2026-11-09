@@ -1,0 +1,4 @@
+# A real model behind the OpenAI adapter. Needs OPENAI_API_KEY.
+# Set the model with AGENTPROOF_OPENAI_MODEL.
+type: openai
+version: openai-default

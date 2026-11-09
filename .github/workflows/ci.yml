@@ -1,0 +1,134 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pinned commit of https://github.com/Vrajesh-works/QuilrAI_MCP used as a test target.
+env:
+  QUILRAI_MCP_SHA: 105a313879dd37270b6f344d34fae180cb550d86
+
+jobs:
+  backend:
+    name: backend lint + unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --project backend --frozen --all-extras
+      - name: Lint
+        run: make lint-backend
+      - name: Validate shipped suites
+        working-directory: backend
+        run: uv run agentproof validate ../suites/retail.yaml ../suites/airline.yaml ../suites/quilrai_mcp.yaml
+      - name: Unit tests
+        run: make test-unit
+      - name: Judge agreement against hand labels
+        working-directory: backend
+        run: uv run agentproof judge-agreement ../suites/judge_labels.yaml --min-kappa 0.4
+
+  integration:
+    name: backend integration (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agentproof
+          POSTGRES_PASSWORD: agentproof
+          POSTGRES_DB: agentproof_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentproof"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --project backend --frozen --all-extras
+      - name: Integration tests on SQLite
+        run: make test-integration
+      - name: Integration tests on PostgreSQL
+        env:
+          AGENTPROOF_TEST_DATABASE_URL: postgresql+psycopg://agentproof:agentproof@localhost:5432/agentproof_test
+        run: make test-integration
+
+  quilrai-contract:
+    name: QuilrAI MCP suite (real server, pinned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Vrajesh-works/QuilrAI_MCP
+          ref: ${{ env.QUILRAI_MCP_SHA }}
+          path: QuilrAI_MCP
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --project backend --frozen
+      - name: Run the suite with the scripted agent
+        working-directory: backend
+        env:
+          QUILRAI_MCP_DIR: ${{ github.workspace }}/QuilrAI_MCP
+        run: uv run agentproof run ../suites/quilrai_mcp.yaml --min-pass-hat-k 1.0 --out ../agentproof-results/quilrai.json
+
+  frontend:
+    name: viewer lint + test + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  compose-smoke:
+    name: docker compose smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: docker compose up --build --wait --wait-timeout 300
+      - name: Seeded runs reachable through the viewer proxy
+        run: |
+          curl -fsS http://localhost:8080/api/health
+          runs=$(curl -fsS http://localhost:8080/api/runs | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+          echo "runs: $runs"
+          test "$runs" -ge 4
+          curl -fsS http://localhost:8080/ | grep -q '<title>AgentProof</title>'
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,96 @@
+name: AgentProof gate
+description: >
+  Run AgentProof task suites against a base and a head agent version and fail
+  the job when pass^k or pass@k drops beyond the tolerance.
+author: Vrajesh-works
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  suites:
+    description: Space or newline separated suite YAML paths, relative to the workspace.
+    required: true
+  head-agent:
+    description: Agent YAML (or spec like scripted:fault_rate=0.2) for the change under test.
+    required: true
+  base-agent:
+    description: Agent YAML for the reference version, usually taken from the target branch.
+    required: true
+  tolerance:
+    description: Allowed drop per metric before the gate fails (0.05 means five points).
+    default: "0"
+  metrics:
+    description: Comma separated metrics to gate on (pass_hat_k, pass_at_k, pass_at_1).
+    default: pass_hat_k,pass_at_k
+  k:
+    description: k for pass@k and pass^k. Empty uses each suite's own k.
+    default: ""
+  judge:
+    description: Judge for open answers (keyword, claude or openai).
+    default: keyword
+  results-dir:
+    description: Directory for result JSON and gate reports.
+    default: agentproof-results
+
+outputs:
+  failed:
+    description: "true when any suite regressed."
+    value: ${{ steps.gate.outputs.failed }}
+  report:
+    description: Path to the combined markdown report.
+    value: ${{ steps.gate.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        python-version: "3.12"
+
+    - name: Install AgentProof
+      shell: bash
+      run: uv sync --project "$GITHUB_ACTION_PATH/backend" --frozen --no-dev --all-extras
+
+    - name: Run base and head, then gate
+      id: gate
+      shell: bash
+      env:
+        SUITES: ${{ inputs.suites }}
+        HEAD_AGENT: ${{ inputs.head-agent }}
+        BASE_AGENT: ${{ inputs.base-agent }}
+        TOLERANCE: ${{ inputs.tolerance }}
+        METRICS: ${{ inputs.metrics }}
+        K: ${{ inputs.k }}
+        JUDGE: ${{ inputs.judge }}
+        OUT: ${{ inputs.results-dir }}
+      run: |
+        set -uo pipefail
+        ap() { uv run --project "$GITHUB_ACTION_PATH/backend" --frozen --no-dev agentproof "$@"; }
+        mkdir -p "$OUT"
+        report="$OUT/gate.md"
+        : > "$report"
+        k_args=()
+        if [ -n "$K" ]; then k_args=(--k "$K"); fi
+        failed=false
+        for suite in $SUITES; do
+          name="$(basename "$suite" .yaml)"
+          echo "::group::$name base ($BASE_AGENT)"
+          ap run "$suite" --agent "$BASE_AGENT" --judge "$JUDGE" --label base "${k_args[@]}" --out "$OUT/$name.base.json" --quiet || { echo "::error::base run failed for $suite"; exit 2; }
+          echo "::endgroup::"
+          echo "::group::$name head ($HEAD_AGENT)"
+          ap run "$suite" --agent "$HEAD_AGENT" --judge "$JUDGE" --label head "${k_args[@]}" --out "$OUT/$name.head.json" --quiet || { echo "::error::head run failed for $suite"; exit 2; }
+          echo "::endgroup::"
+          if ! ap gate --base "$OUT/$name.base.json" --head "$OUT/$name.head.json" \
+              --tolerance "$TOLERANCE" --metrics "$METRICS" \
+              --markdown "$OUT/$name.gate.md" --json "$OUT/$name.gate.json"; then
+            failed=true
+            echo "::error title=AgentProof regression::$name scores dropped beyond tolerance $TOLERANCE"
+          fi
+          cat "$OUT/$name.gate.md" >> "$report"
+          echo >> "$report"
+        done
+        echo "failed=$failed" >> "$GITHUB_OUTPUT"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        if [ "$failed" = true ]; then exit 1; fi
